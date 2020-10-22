@@ -1,0 +1,247 @@
+---
+title: "Killer Profits from Horrow Movies..."
+author: "A Foster"
+date: "11/10/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# SETUP
+#========================
+# INSTALL AND LOAD REQUIRED PACKAGES
+
+# list required packages
+pckges <- c("tidyverse", "data.table", "kableExtra", "extrafont", "lubridate", "scales",
+            "ggpubr", "jpeg", "ggimage")
+# determine packages not installed
+mssng <- pckges[!(pckges %in% installed.packages()[,"Package"])]
+# install missing
+if(length(mssng)) install.packages(mssng, dependencies = TRUE)
+# load 
+lapply(pckges, require, character.only = TRUE)
+
+```
+
+## Intro
+
+This markdown looks at a Tidy Tuesday challenge from Oct 2018, in which we will analyse the profit margins of horror movies (in a specific data set).
+
+**Links**
+
+| Main Tidy Tuesday repo: <https://github.com/rfordatascience/tidytuesday>
+| Horrow Movies repo: <https://github.com/rfordatascience/tidytuesday/tree/master/data/2018/2018-10-23>
+| Repo for this project: <https://github.com/eightsixtwo/tidyT_horror>
+
+
+```{r load, include=FALSE}
+
+# download directly from GitHub
+horror_movies <- readr::read_csv(
+  "https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2018/2018-10-23/movie_profit.csv")
+
+```
+
+### Inspect Data
+
+We can use several functions to look at our data; `str()` and `View()` are useful while working.  For this document, let's print a table using `kable()`, a function built into the knitr package that powers RMarkdown;
+
+NOTE: kable styling options are here: <https://bookdown.org/yihui/rmarkdown-cookbook/kableextra.html>
+
+```{r insp}
+
+knitr::kable(horror_movies) %>%
+  kable_styling() %>%
+  scroll_box(height = "500px")
+
+```
+It seems that the data contains more than just horror movies.  We can filter those out;
+
+```{r filtr}
+# obviously there is more data than is needed
+horror_movies <- horror_movies %>%
+  filter(genre == "Horror")
+
+```
+
+That's more like it!  So, let's get to know the data a little more;
+
+```{r stats01}
+summary(horror_movies)
+# check for duplicate movies
+horror_movies %>% count(movie, sort = T)
+
+```
+
+Great!  We're not getting any duplicate movies but if we look closely at the summary figures then it looks like we're getting interference from R's built in scientific notation parameters.  Fortunately, this is not a problem with the underlying data, only with the way we are looking at it and this can be altered so that no number is ever changed to scientific notation.
+
+```{r sciNotes}
+#options(scipen=999)
+```
+
+Try again;
+
+```{r stats02}
+summary(horror_movies)
+```
+
+OK, so the date is currently a character.  We could change this to a date data type quite easily, but lets do some simple checks on the column first.  Lets have a look to see if there are any missing values;
+
+```{r}
+horDate <- horror_movies$release_date
+# what data type is the date currently in?
+str(horDate)
+
+# Do we have any missing values in our dates data?
+paste0("Number of rows with missing values: ", sum(is.na(horDate)))
+
+```
+Are there any unusual strings in our date data?  I.e. are there any strings that are too short/long, which would be an indication that they are not in DD/MM/YYYY format and therefore unusual.
+```{r}
+# First, create a new variable that contains the number of chars in the date string and then sort;
+dateLens <- horror_movies %>%
+  mutate(len = nchar(release_date)) %>%
+  select(release_date, len) %>%
+  arrange(len) 
+
+# Next, have a look at the 10 shortest strings
+knitr::kable(head(dateLens, 10))
+# Finally, have a look at the 10 longest strings
+knitr::kable(tail(dateLens, 10))
+```
+
+In doing this we've established that there are no missing values in the date column and that strings appear to have the right number of chars.  Granted, the formatting seems to be missing zeros and is in MM/DD/YYYY format (i.e. 1/28/2000 not 28/01/2000), but there are several R tools that can deal with that - see; `Lubridate()`
+
+```{r}
+# Lets change the data type of release_date.  There are numerous ways to do this, this is only one;
+horror_movies <- horror_movies %>%
+  mutate(release_date = as.Date(parse_date_time(release_date, "%m!/%d/%Y")))
+# check it worked;
+str(horror_movies$release_date)
+```
+
+
+Bingo!
+
+## Visualisations
+
+When it comes to creating customisable visualisations, R is amazing.  There are *lots* of packages out there that can help visualise data in a huge array of different ways.  `Ggplot2`, otherwise known as Grammar of Graphics Plot, is native to the Tidyverse and works well with many of the most commonly used packages, including `leaflet` (maps), `gganimate` (animations), `Plotly` and `ggridges`.
+
+For some examples of what is achievable see: <https://www.r-graph-gallery.com/index.html> (not the only website!!).
+
+Lets create some visualisations to explore the difference between the box office revenue and the amount each movie cost to make;
+
+```{r}
+# Plot amount spent against amount made in a scatterplot
+ggplot(horror_movies, aes(x = production_budget, y = worldwide_gross)) + 
+  geom_point()  # adds points to the chart
+
+```
+Notice how the axis values are in scientific notation?  Those axes look a little messy because R has automatically applied a log scale to the axis labels each so that it fits comfortably into the plot (the underlying data is, as yet, unscaled).
+
+We can undo that automatic action by adding instructions of how we want the axes to be displayed;
+```{r}
+ggplot(horror_movies, aes(x = production_budget, y = worldwide_gross)) + 
+  geom_point()  + 
+  scale_x_continuous(labels = dollar_format()) + 
+  scale_y_continuous(labels = dollar_format())
+```
+Notice how the majority of our data is crammed into the bottom left of the chart?  This is because there are extreme outlier values being plotted.  As our data is squashed into a corner, it's hard to see if there are any patterns.
+
+We could filter these out but instead let's scale the data to see if there are any patterns elsewhere;
+
+```{r}
+#
+ggplot(horror_movies, aes(x = production_budget, y = worldwide_gross)) + 
+  geom_point() + 
+  scale_x_log10(labels = dollar_format()) + 
+  scale_y_log10(labels = dollar_format())
+
+
+```
+
+By applying a log10 scale to the data we can now see that there's a lot of movies that both cost more than \$10mil and made more than \$10mil.  We also generated a warning about infinite values being created - I'm not too worried about this as it's likely because there are some zero values in our data.
+
+Lets have a closer look at profit;
+
+```{r}
+# add a new profit column to our dataframe;
+horror_movies <- horror_movies %>%
+  mutate(worldwide_profit = worldwide_gross - production_budget)
+```
+
+Now we can look at the distribution of our population based on profit;
+
+```{r}
+# create a histogram of profit and give it a cool colour
+ggplot(horror_movies, aes(x = worldwide_profit, fill = "#850b0b")) + 
+  geom_histogram() + 
+  scale_x_continuous(labels = dollar_format()) 
+```
+
+
+OK, what if we wanted to explore profit a little further?  We could categorise our data into distributors, for example.
+
+Lets make another dataset to help us, in which we'll lump our distributors into the six most common plus an 'other' category;
+
+```{r}
+# lets also filter out missing values as we're not really interested in records where distributor isn't listed
+distributors <- horror_movies %>%
+  mutate(distributor = fct_lump(distributor, 6)) %>%
+  filter(!is.na(distributor))
+  
+distributors %>% count(distributor, sort = T)
+
+```
+
+Now we can create a box plot for each distributor;
+
+```{r}
+
+ggplot(distributors, aes(distributor, production_budget, fill = distributor)) +
+  geom_boxplot() +
+  scale_y_log10(labels = dollar_format()) +
+  coord_flip() # puts the graph on it's side (90 deg turn)
+
+```
+Finally, lets see which was the most profitable decade;
+```{r}
+# first, create another new variable that will hold the decade the movie was released;
+horror_movies <- horror_movies %>%
+  mutate(decade = as.factor(10* floor(year(release_date) / 10)))
+
+# now we can plot a chart to show profit per decade, only lets add some styling;
+
+# grab a photo from the tinterweb;
+url <- "https://images-wixmp-ed30a86b8c4ca887773594c2.wixmp.com/f/3aaf43c8-aa23-498a-ae6f-4e3a338544d7/dbf137n-42730515-3ec4-4b92-bfc0-5595cb1595d5.png/v1/fill/w_1024,h_576,q_80,strp/umbrella___resident_evil__wallpaper__by_alecsander96_dbf137n-fullview.jpg?token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1cm46YXBwOiIsImlzcyI6InVybjphcHA6Iiwib2JqIjpbW3siaGVpZ2h0IjoiPD01NzYiLCJwYXRoIjoiXC9mXC8zYWFmNDNjOC1hYTIzLTQ5OGEtYWU2Zi00ZTNhMzM4NTQ0ZDdcL2RiZjEzN24tNDI3MzA1MTUtM2VjNC00YjkyLWJmYzAtNTU5NWNiMTU5NWQ1LnBuZyIsIndpZHRoIjoiPD0xMDI0In1dXSwiYXVkIjpbInVybjpzZXJ2aWNlOmltYWdlLm9wZXJhdGlvbnMiXX0.zxe76RgzoA_R-EQI13wXntg4gG-NgZHrScBcSwFlb1U"
+
+# download the image into a jpeg
+download.file(url, mode = "wb", destfile = "scary_pic.jpg")
+# read the downloaded image into an object
+img <- readJPEG("scary_pic.jpg")
+
+# create group totals for bar labels
+horror_movies <- horror_movies %>%
+  group_by(decade) %>%
+  mutate(total = sum(worldwide_profit))
+
+ggplot(horror_movies, aes(x = decade, y = worldwide_profit, fill = "#850b0b", alpha = 0.5)) +
+  background_image(img) +
+  geom_col() +
+  theme_minimal() + # set a minimal theme
+  theme(legend.position = "none") + # remove the legend
+  theme(plot.title = element_text(hjust = 0.5)) + # centre the title
+  geom_text(aes(decade, total, label = paste0("$", round(total / 1000000000, 2), "Bn")), 
+            color="white", check_overlap = T, alpha = 2) +
+  geom_hline(yintercept = 0) + # adds a horizontal line at zero
+  scale_y_continuous(labels = dollar_format(scale = 0.000000001, suffix = " Bn")) +
+  xlab("Decade Released") +
+  ylab("Worldwide Profit") +
+  labs(title = "Which decade was most profitable?") 
+
+
+
+```
+
+
